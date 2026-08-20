@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>お金の帳簿</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --bg:#f5f5f3; --card:#ffffff; --ink:#1f1f1f; --sub:#767672;
+    --accent:#2f6f5e; --accent-light:#e5f0ec; --border:#e2e0da; --danger:#b3543f;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif;
+    background:var(--bg); color:var(--ink); padding-bottom:40px;
+  }
+  header{ padding:16px 16px 8px; }
+  h1{ font-size:18px; margin:0 0 4px; }
+  .sub{ color:var(--sub); font-size:12px; }
+
+  .tabs{
+    display:flex; gap:6px; overflow-x:auto; padding:12px 16px 4px;
+    -webkit-overflow-scrolling:touch;
+  }
+  .tab-btn{
+    flex:0 0 auto; padding:8px 14px; border-radius:20px; border:1px solid var(--border);
+    background:var(--card); color:var(--sub); font-size:14px; white-space:nowrap;
+  }
+  .tab-btn.active{ background:var(--accent); color:#fff; border-color:var(--accent); }
+  .tab-add{
+    flex:0 0 auto; padding:8px 12px; border-radius:20px; border:1px dashed var(--border);
+    background:transparent; color:var(--accent); font-size:14px;
+  }
+
+  main{ padding:8px 16px 0; max-width:640px; margin:0 auto; }
+
+  .card{
+    background:var(--card); border:1px solid var(--border); border-radius:14px;
+    padding:14px; margin-bottom:12px;
+  }
+
+  .sum-card{
+    background:var(--accent-light); border:1px solid var(--accent);
+    text-align:center; padding:16px;
+  }
+  .sum-label{ font-size:12px; color:var(--accent); margin-bottom:4px; }
+  .sum-value{ font-size:28px; font-weight:700; color:var(--accent); }
+  .sum-count{ font-size:12px; color:var(--sub); margin-top:4px; }
+
+  .filter-row{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+  .filter-row select, .filter-row input{
+    flex:1 1 auto; min-width:100px; padding:8px 10px; border:1px solid var(--border);
+    border-radius:8px; font-size:14px; background:#fff;
+  }
+  .date-range{ display:none; gap:8px; margin-top:8px; }
+  .date-range.show{ display:flex; }
+
+  form.entry-form{ display:flex; flex-direction:column; gap:8px; }
+  .entry-form .row{ display:flex; gap:8px; }
+  .entry-form input{
+    flex:1; padding:10px; border:1px solid var(--border); border-radius:8px; font-size:14px;
+  }
+  .entry-form button{
+    padding:10px; border:none; border-radius:8px; background:var(--accent); color:#fff;
+    font-size:14px; font-weight:600;
+  }
+
+  .entry-list{ display:flex; flex-direction:column; gap:6px; }
+  .entry{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:10px 4px; border-bottom:1px solid var(--border); font-size:14px;
+  }
+  .entry:last-child{ border-bottom:none; }
+  .entry-main{ display:flex; flex-direction:column; }
+  .entry-item{ font-weight:600; }
+  .entry-meta{ font-size:12px; color:var(--sub); }
+  .entry-amount{ font-weight:700; margin-left:8px; white-space:nowrap; }
+  .entry-del{ background:none; border:none; color:var(--danger); font-size:12px; margin-left:8px; }
+
+  .empty{ text-align:center; color:var(--sub); font-size:13px; padding:20px 0; }
+
+  .tab-manage{ display:flex; gap:8px; font-size:12px; color:var(--sub); margin-top:8px; }
+  .tab-manage button{ background:none; border:none; color:var(--sub); text-decoration:underline; font-size:12px; padding:0; }
+
+  .toast{
+    position:fixed; bottom:16px; left:50%; transform:translateX(-50%);
+    background:#1f1f1f; color:#fff; padding:8px 16px; border-radius:20px; font-size:13px;
+    opacity:0; transition:opacity .2s; pointer-events:none;
+  }
+  .toast.show{ opacity:0.92; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>お金の帳簿</h1>
+  <div class="sub" id="connStatus">接続中...</div>
+</header>
+
+<div class="tabs" id="tabBar"></div>
+
+<main>
+  <div class="card sum-card">
+    <div class="sum-label">合計</div>
+    <div class="sum-value" id="sumValue">¥0</div>
+    <div class="sum-count" id="sumCount">0件</div>
+  </div>
+
+  <div class="card">
+    <div class="filter-row">
+      <select id="periodSelect">
+        <option value="thisMonth">今月</option>
+        <option value="lastMonth">先月</option>
+        <option value="all">全期間</option>
+        <option value="custom">期間を指定</option>
+      </select>
+      <input type="text" id="keyword" placeholder="店舗・品目で絞り込み">
+    </div>
+    <div class="date-range" id="customRange">
+      <input type="date" id="rangeFrom">
+      <input type="date" id="rangeTo">
+    </div>
+  </div>
+
+  <div class="card">
+    <form class="entry-form" id="entryForm">
+      <div class="row">
+        <input type="date" id="inpDate" required>
+        <input type="number" id="inpAmount" placeholder="金額" required inputmode="numeric">
+      </div>
+      <div class="row">
+        <input type="text" id="inpItem" placeholder="品目">
+        <input type="text" id="inpStore" placeholder="店舗・カテゴリ">
+      </div>
+      <input type="text" id="inpMemo" placeholder="メモ（任意）">
+      <button type="submit">追加</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="entry-list" id="entryList"></div>
+    <div class="empty" id="emptyMsg" style="display:none;">この条件のデータはまだありません</div>
+  </div>
+
+  <div class="tab-manage">
+    <button id="renameTabBtn">タブ名を変更</button>
+    <button id="deleteTabBtn">このタブを削除</button>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ▼▼▼ ここを自分のSupabaseプロジェクトの値に書き換えてください ▼▼▼
+const SUPABASE_URL = "YOUR_SUPABASE_URL";
+const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let tabs = [];
+let currentTab = null;
+let entries = [];
+
+const $ = (id) => document.getElementById(id);
+
+function toast(msg){
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  setTimeout(()=>t.classList.remove("show"), 1800);
+}
+
+function todayStr(){
+  return new Date().toISOString().slice(0,10);
+}
+
+async function init(){
+  $("inpDate").value = todayStr();
+  await loadTabs();
+  wireEvents();
+}
+
+async function loadTabs(){
+  const { data, error } = await sb.from("money_tabs").select("*").order("sort_order", { ascending:true });
+  if (error){ $("connStatus").textContent = "接続エラー: " + error.message; return; }
+  tabs = data;
+  $("connStatus").textContent = "";
+  if (!currentTab && tabs.length) currentTab = tabs[0].name;
+  renderTabs();
+  if (currentTab) await loadEntries();
+}
+
+function renderTabs(){
+  const bar = $("tabBar");
+  bar.innerHTML = "";
+  tabs.forEach(t=>{
+    const b = document.createElement("button");
+    b.className = "tab-btn" + (t.name === currentTab ? " active" : "");
+    b.textContent = t.name;
+    b.onclick = async ()=>{ currentTab = t.name; renderTabs(); await loadEntries(); };
+    bar.appendChild(b);
+  });
+  const add = document.createElement("button");
+  add.className = "tab-add";
+  add.textContent = "＋タブ追加";
+  add.onclick = addTab;
+  bar.appendChild(add);
+}
+
+async function addTab(){
+  const name = prompt("新しいタブ名を入力してください（例：日用品、〇〇の医療費 など）");
+  if (!name) return;
+  const maxOrder = tabs.reduce((m,t)=>Math.max(m, t.sort_order||0), 0);
+  const { error } = await sb.from("money_tabs").insert({ name, sort_order: maxOrder + 1 });
+  if (error){ toast("追加失敗: " + error.message); return; }
+  currentTab = name;
+  await loadTabs();
+}
+
+async function renameCurrentTab(){
+  if (!currentTab) return;
+  const name = prompt("新しいタブ名", currentTab);
+  if (!name || name === currentTab) return;
+  const { error: e1 } = await sb.from("money_tabs").update({ name }).eq("name", currentTab);
+  if (e1){ toast("変更失敗: " + e1.message); return; }
+  await sb.from("money_entries").update({ tab_name: name }).eq("tab_name", currentTab);
+  currentTab = name;
+  await loadTabs();
+}
+
+async function deleteCurrentTab(){
+  if (!currentTab) return;
+  if (!confirm(`「${currentTab}」タブとその中の全データを削除します。よろしいですか？`)) return;
+  await sb.from("money_entries").delete().eq("tab_name", currentTab);
+  await sb.from("money_tabs").delete().eq("name", currentTab);
+  currentTab = null;
+  await loadTabs();
+}
+
+async function loadEntries(){
+  const { data, error } = await sb.from("money_entries")
+    .select("*")
+    .eq("tab_name", currentTab)
+    .order("entry_date", { ascending:false });
+  if (error){ toast("読み込み失敗: " + error.message); return; }
+  entries = data;
+  render();
+}
+
+function getPeriodRange(){
+  const period = $("periodSelect").value;
+  const now = new Date();
+  if (period === "thisMonth"){
+    const from = new Date(now.getFullYear(), now.getMonth(), 1);
+    const to = new Date(now.getFullYear(), now.getMonth()+1, 0);
+    return [from.toISOString().slice(0,10), to.toISOString().slice(0,10)];
+  }
+  if (period === "lastMonth"){
+    const from = new Date(now.getFullYear(), now.getMonth()-1, 1);
+    const to = new Date(now.getFullYear(), now.getMonth(), 0);
+    return [from.toISOString().slice(0,10), to.toISOString().slice(0,10)];
+  }
+  if (period === "custom"){
+    return [$("rangeFrom").value || null, $("rangeTo").value || null];
+  }
+  return [null, null];
+}
+
+function render(){
+  const [from, to] = getPeriodRange();
+  const kw = $("keyword").value.trim().toLowerCase();
+
+  const filtered = entries.filter(e=>{
+    if (from && e.entry_date < from) return false;
+    if (to && e.entry_date > to) return false;
+    if (kw){
+      const hay = ((e.item||"") + " " + (e.store||"") + " " + (e.memo||"")).toLowerCase();
+      if (!hay.includes(kw)) return false;
+    }
+    return true;
+  });
+
+  const sum = filtered.reduce((s,e)=>s + Number(e.amount||0), 0);
+  $("sumValue").textContent = "¥" + sum.toLocaleString();
+  $("sumCount").textContent = filtered.length + "件";
+
+  const list = $("entryList");
+  list.innerHTML = "";
+  $("emptyMsg").style.display = filtered.length ? "none" : "block";
+
+  filtered.forEach(e=>{
+    const row = document.createElement("div");
+    row.className = "entry";
+    row.innerHTML = `
+      <div class="entry-main">
+        <span class="entry-item">${escapeHtml(e.item || "(品目未入力)")}</span>
+        <span class="entry-meta">${e.entry_date}${e.store ? " ・ " + escapeHtml(e.store) : ""}${e.memo ? " ・ " + escapeHtml(e.memo) : ""}</span>
+      </div>
+      <div style="display:flex; align-items:center;">
+        <span class="entry-amount">¥${Number(e.amount).toLocaleString()}</span>
+        <button class="entry-del" data-id="${e.id}">削除</button>
+      </div>
+    `;
+    list.appendChild(row);
+  });
+
+  list.querySelectorAll(".entry-del").forEach(btn=>{
+    btn.onclick = async ()=>{
+      const id = btn.getAttribute("data-id");
+      const { error } = await sb.from("money_entries").delete().eq("id", id);
+      if (error){ toast("削除失敗: " + error.message); return; }
+      await loadEntries();
+    };
+  });
+}
+
+function escapeHtml(str){
+  return String(str).replace(/[&<>"']/g, c=>({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  }[c]));
+}
+
+function wireEvents(){
+  $("periodSelect").onchange = ()=>{
+    $("customRange").classList.toggle("show", $("periodSelect").value === "custom");
+    render();
+  };
+  $("keyword").oninput = render;
+  $("rangeFrom").onchange = render;
+  $("rangeTo").onchange = render;
+
+  $("entryForm").onsubmit = async (ev)=>{
+    ev.preventDefault();
+    if (!currentTab){ toast("先にタブを作成してください"); return; }
+    const payload = {
+      tab_name: currentTab,
+      entry_date: $("inpDate").value,
+      item: $("inpItem").value.trim(),
+      store: $("inpStore").value.trim(),
+      amount: Number($("inpAmount").value),
+      memo: $("inpMemo").value.trim()
+    };
+    const { error } = await sb.from("money_entries").insert(payload);
+    if (error){ toast("追加失敗: " + error.message); return; }
+    $("inpItem").value = "";
+    $("inpStore").value = "";
+    $("inpAmount").value = "";
+    $("inpMemo").value = "";
+    $("inpDate").value = todayStr();
+    toast("追加しました");
+    await loadEntries();
+  };
+
+  $("renameTabBtn").onclick = renameCurrentTab;
+  $("deleteTabBtn").onclick = deleteCurrentTab;
+}
+
+init();
+</script>
+</body>
+</html>
