@@ -89,6 +89,36 @@
     opacity:0; transition:opacity .2s; pointer-events:none;
   }
   .toast.show{ opacity:0.92; }
+
+  .entry{ cursor:pointer; }
+  .entry-editing{ background:var(--accent-light); border-radius:8px; }
+
+  .form-actions{ display:flex; gap:8px; }
+  .form-actions button{ flex:1; }
+  .btn-cancel{ background:#fff !important; color:var(--sub) !important; border:1px solid var(--border) !important; }
+
+  .pdf-btn{
+    width:100%; margin-top:8px; padding:10px; border:1px solid var(--accent);
+    border-radius:8px; background:#fff; color:var(--accent); font-size:14px; font-weight:600;
+  }
+
+  #printArea{ display:none; }
+
+  @media print{
+    body *{ visibility:hidden; }
+    #printArea, #printArea *{ visibility:visible; }
+    #printArea{
+      display:block; position:absolute; top:0; left:0; width:100%;
+      font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif;
+    }
+    #printArea h2{ font-size:16px; margin:0 0 4px; }
+    #printArea .print-meta{ font-size:12px; color:#555; margin-bottom:12px; }
+    #printArea table{ width:100%; border-collapse:collapse; font-size:12px; }
+    #printArea th, #printArea td{ border:1px solid #999; padding:6px 8px; text-align:left; }
+    #printArea th{ background:#eee; }
+    #printArea td.num, #printArea th.num{ text-align:right; }
+    #printArea tfoot td{ font-weight:700; background:#f5f5f5; }
+  }
 </style>
 </head>
 <body>
@@ -121,10 +151,12 @@
       <input type="date" id="rangeFrom">
       <input type="date" id="rangeTo">
     </div>
+    <button type="button" class="pdf-btn" id="pdfBtn">この絞り込み結果をPDFで出力</button>
   </div>
 
   <div class="card">
     <form class="entry-form" id="entryForm">
+      <input type="hidden" id="editingId" value="">
       <div class="row">
         <input type="date" id="inpDate" required>
         <input type="number" id="inpAmount" placeholder="金額" required inputmode="numeric">
@@ -134,7 +166,10 @@
         <input type="text" id="inpStore" placeholder="店舗・カテゴリ">
       </div>
       <input type="text" id="inpMemo" placeholder="メモ（任意）">
-      <button type="submit">追加</button>
+      <div class="form-actions">
+        <button type="button" class="btn-cancel" id="cancelEditBtn" style="display:none;">キャンセル</button>
+        <button type="submit" id="submitBtn">追加</button>
+      </div>
     </form>
   </div>
 
@@ -150,6 +185,8 @@
 </main>
 
 <div class="toast" id="toast"></div>
+
+<div id="printArea"></div>
 
 <script>
 // ▼▼▼ ここを自分のSupabaseプロジェクトの値に書き換えてください ▼▼▼
@@ -292,7 +329,7 @@ function render(){
 
   filtered.forEach(e=>{
     const row = document.createElement("div");
-    row.className = "entry";
+    row.className = "entry" + (e.id === $("editingId").value ? " entry-editing" : "");
     row.innerHTML = `
       <div class="entry-main">
         <span class="entry-item">${escapeHtml(e.item || "(品目未入力)")}</span>
@@ -303,17 +340,50 @@ function render(){
         <button class="entry-del" data-id="${e.id}">削除</button>
       </div>
     `;
+    row.addEventListener("click", (ev)=>{
+      if (ev.target.classList.contains("entry-del")) return;
+      startEdit(e);
+    });
     list.appendChild(row);
   });
 
   list.querySelectorAll(".entry-del").forEach(btn=>{
-    btn.onclick = async ()=>{
+    btn.onclick = async (ev)=>{
+      ev.stopPropagation();
       const id = btn.getAttribute("data-id");
       const { error } = await sb.from("money_entries").delete().eq("id", id);
       if (error){ toast("削除失敗: " + error.message); return; }
+      if ($("editingId").value === id) cancelEdit();
       await loadEntries();
     };
   });
+
+  window.__lastFiltered = filtered;
+}
+
+function startEdit(e){
+  $("editingId").value = e.id;
+  $("inpDate").value = e.entry_date;
+  $("inpAmount").value = e.amount;
+  $("inpItem").value = e.item || "";
+  $("inpStore").value = e.store || "";
+  $("inpMemo").value = e.memo || "";
+  $("submitBtn").textContent = "更新";
+  $("cancelEditBtn").style.display = "block";
+  render();
+  $("entryForm").scrollIntoView({ behavior:"smooth", block:"center" });
+}
+
+function cancelEdit(){
+  $("editingId").value = "";
+  $("inpItem").value = "";
+  $("inpStore").value = "";
+  $("inpAmount").value = "";
+  $("inpMemo").value = "";
+  $("inpDate").value = todayStr();
+  $("submitBtn").textContent = "追加";
+  $("cancelEditBtn").style.display = "none";
+  render();
 }
 
 function escapeHtml(str){
@@ -342,19 +412,74 @@ function wireEvents(){
       amount: Number($("inpAmount").value),
       memo: $("inpMemo").value.trim()
     };
-    const { error } = await sb.from("money_entries").insert(payload);
-    if (error){ toast("追加失敗: " + error.message); return; }
-    $("inpItem").value = "";
-    $("inpStore").value = "";
-    $("inpAmount").value = "";
-    $("inpMemo").value = "";
-    $("inpDate").value = todayStr();
-    toast("追加しました");
+    const editingId = $("editingId").value;
+
+    if (editingId){
+      const { error } = await sb.from("money_entries").update(payload).eq("id", editingId);
+      if (error){ toast("更新失敗: " + error.message); return; }
+      toast("更新しました");
+      cancelEdit();
+    } else {
+      const { error } = await sb.from("money_entries").insert(payload);
+      if (error){ toast("追加失敗: " + error.message); return; }
+      $("inpItem").value = "";
+      $("inpStore").value = "";
+      $("inpAmount").value = "";
+      $("inpMemo").value = "";
+      $("inpDate").value = todayStr();
+      toast("追加しました");
+    }
     await loadEntries();
   };
 
+  $("cancelEditBtn").onclick = cancelEdit;
   $("renameTabBtn").onclick = renameCurrentTab;
   $("deleteTabBtn").onclick = deleteCurrentTab;
+  $("pdfBtn").onclick = exportPDF;
+}
+
+function periodLabel(){
+  const period = $("periodSelect").value;
+  if (period === "thisMonth") return "今月";
+  if (period === "lastMonth") return "先月";
+  if (period === "all") return "全期間";
+  const [from, to] = getPeriodRange();
+  if (from || to) return `${from || "…"} 〜 ${to || "…"}`;
+  return "全期間";
+}
+
+function exportPDF(){
+  const filtered = window.__lastFiltered || [];
+  if (!filtered.length){ toast("出力するデータがありません"); return; }
+
+  const kw = $("keyword").value.trim();
+  const sum = filtered.reduce((s,e)=>s + Number(e.amount||0), 0);
+
+  const rows = filtered.map(e => `
+    <tr>
+      <td>${e.entry_date}</td>
+      <td>${escapeHtml(e.item || "")}</td>
+      <td>${escapeHtml(e.store || "")}</td>
+      <td class="num">¥${Number(e.amount).toLocaleString()}</td>
+      <td>${escapeHtml(e.memo || "")}</td>
+    </tr>
+  `).join("");
+
+  $("printArea").innerHTML = `
+    <h2>お金の帳簿 - ${escapeHtml(currentTab)}</h2>
+    <div class="print-meta">期間: ${periodLabel()}${kw ? " ／ キーワード: " + escapeHtml(kw) : ""} ／ 出力日: ${todayStr()}</div>
+    <table>
+      <thead>
+        <tr><th>日付</th><th>品目</th><th>店舗・カテゴリ</th><th class="num">金額</th><th>メモ</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+      <tfoot>
+        <tr><td colspan="3">合計（${filtered.length}件）</td><td class="num">¥${sum.toLocaleString()}</td><td></td></tr>
+      </tfoot>
+    </table>
+  `;
+
+  window.print();
 }
 
 init();
