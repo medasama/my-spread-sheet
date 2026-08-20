@@ -152,6 +152,7 @@
       <input type="date" id="rangeTo">
     </div>
     <button type="button" class="pdf-btn" id="pdfBtn">この絞り込み結果をPDFで出力</button>
+    <button type="button" class="pdf-btn" id="csvBtn" style="margin-top:6px;">この絞り込み結果をCSVで出力（Googleスプレッドシート用）</button>
   </div>
 
   <div class="card">
@@ -436,6 +437,7 @@ function wireEvents(){
   $("renameTabBtn").onclick = renameCurrentTab;
   $("deleteTabBtn").onclick = deleteCurrentTab;
   $("pdfBtn").onclick = exportPDF;
+  $("csvBtn").onclick = exportCSV;
 }
 
 function periodLabel(){
@@ -480,6 +482,42 @@ function exportPDF(){
   `;
 
   window.print();
+}
+
+function csvEscape(v){
+  const s = String(v ?? "");
+  if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+function exportCSV(){
+  const filtered = window.__lastFiltered || [];
+  if (!filtered.length){ toast("出力するデータがありません"); return; }
+
+  const header = ["日付","品目","店舗・カテゴリ","金額","メモ"];
+  const lines = [header.join(",")];
+  filtered.forEach(e=>{
+    lines.push([
+      e.entry_date,
+      csvEscape(e.item || ""),
+      csvEscape(e.store || ""),
+      Number(e.amount),
+      csvEscape(e.memo || "")
+    ].join(","));
+  });
+
+  // Googleスプレッドシート/Excelで日本語が文字化けしないようUTF-8 BOMを付与
+  const csvContent = "﻿" + lines.join("\r\n");
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${currentTab}_${todayStr()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast("CSVをダウンロードしました");
 }
 
 init();
