@@ -15,9 +15,16 @@
     margin:0; font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif;
     background:var(--bg); color:var(--ink); padding-bottom:40px;
   }
-  header{ padding:16px 16px 8px; }
+  header{ padding:16px 16px 8px; display:flex; justify-content:space-between; align-items:flex-start; }
+  .header-titles{ flex:1; }
   h1{ font-size:18px; margin:0 0 4px; }
   .sub{ color:var(--sub); font-size:12px; }
+
+  .header-export{ display:flex; gap:12px; padding-top:2px; }
+  .export-link{
+    background:none; border:none; color:var(--accent); font-size:12px; font-weight:600;
+    text-decoration:underline; padding:0;
+  }
 
   .tabs{
     display:flex; gap:6px; overflow-x:auto; padding:12px 16px 4px;
@@ -97,11 +104,6 @@
   .form-actions button{ flex:1; }
   .btn-cancel{ background:#fff !important; color:var(--sub) !important; border:1px solid var(--border) !important; }
 
-  .pdf-btn{
-    width:100%; margin-top:8px; padding:10px; border:1px solid var(--accent);
-    border-radius:8px; background:#fff; color:var(--accent); font-size:14px; font-weight:600;
-  }
-
   #printArea{ display:none; }
 
   @media print{
@@ -124,8 +126,14 @@
 <body>
 
 <header>
-  <h1>お金の帳簿</h1>
-  <div class="sub" id="connStatus">接続中...</div>
+  <div class="header-titles">
+    <h1>お金の帳簿</h1>
+    <div class="sub" id="connStatus">接続中...</div>
+  </div>
+  <div class="header-export">
+    <button type="button" class="export-link" id="pdfBtn">PDF出力</button>
+    <button type="button" class="export-link" id="csvBtn">CSV出力</button>
+  </div>
 </header>
 
 <div class="tabs" id="tabBar"></div>
@@ -135,24 +143,6 @@
     <div class="sum-label">合計</div>
     <div class="sum-value" id="sumValue">¥0</div>
     <div class="sum-count" id="sumCount">0件</div>
-  </div>
-
-  <div class="card">
-    <div class="filter-row">
-      <select id="periodSelect">
-        <option value="thisMonth">今月</option>
-        <option value="lastMonth">先月</option>
-        <option value="all">全期間</option>
-        <option value="custom">期間を指定</option>
-      </select>
-      <input type="text" id="keyword" placeholder="店舗・品目で絞り込み">
-    </div>
-    <div class="date-range" id="customRange">
-      <input type="date" id="rangeFrom">
-      <input type="date" id="rangeTo">
-    </div>
-    <button type="button" class="pdf-btn" id="pdfBtn">この絞り込み結果をPDFで出力</button>
-    <button type="button" class="pdf-btn" id="csvBtn" style="margin-top:6px;">この絞り込み結果をCSVで出力（Googleスプレッドシート用）</button>
   </div>
 
   <div class="card">
@@ -172,6 +162,22 @@
         <button type="submit" id="submitBtn">追加</button>
       </div>
     </form>
+  </div>
+
+  <div class="card">
+    <div class="filter-row">
+      <select id="periodSelect">
+        <option value="thisMonth">今月</option>
+        <option value="lastMonth">先月</option>
+        <option value="all">全期間</option>
+        <option value="custom">期間を指定</option>
+      </select>
+      <input type="text" id="keyword" placeholder="店舗・品目で絞り込み">
+    </div>
+    <div class="date-range" id="customRange">
+      <input type="date" id="rangeFrom">
+      <input type="date" id="rangeTo">
+    </div>
   </div>
 
   <div class="card">
