@@ -64,9 +64,9 @@
   .date-range.show{ display:flex; }
 
   form.entry-form{ display:flex; flex-direction:column; gap:8px; }
-  .entry-form .row{ display:flex; gap:8px; }
+  .entry-form .row{ display:flex; gap:8px; min-width:0; }
   .entry-form input{
-    flex:1; padding:10px; border:1px solid var(--border); border-radius:8px; font-size:14px;
+    flex:1; min-width:0; padding:10px; border:1px solid var(--border); border-radius:8px; font-size:14px;
   }
   .entry-form button{
     padding:10px; border:none; border-radius:8px; background:var(--accent); color:#fff;
@@ -152,10 +152,7 @@
         <input type="date" id="inpDate" required>
         <input type="number" id="inpAmount" placeholder="金額" required inputmode="numeric">
       </div>
-      <div class="row">
-        <input type="text" id="inpItem" placeholder="品目">
-        <input type="text" id="inpStore" placeholder="店舗・カテゴリ">
-      </div>
+      <input type="text" id="inpStore" placeholder="店舗">
       <input type="text" id="inpMemo" placeholder="メモ（任意）">
       <div class="form-actions">
         <button type="button" class="btn-cancel" id="cancelEditBtn" style="display:none;">キャンセル</button>
@@ -172,7 +169,7 @@
         <option value="all">全期間</option>
         <option value="custom">期間を指定</option>
       </select>
-      <input type="text" id="keyword" placeholder="店舗・品目で絞り込み">
+      <input type="text" id="keyword" placeholder="店舗・メモで絞り込み">
     </div>
     <div class="date-range" id="customRange">
       <input type="date" id="rangeFrom">
@@ -320,7 +317,7 @@ function render(){
     if (from && e.entry_date < from) return false;
     if (to && e.entry_date > to) return false;
     if (kw){
-      const hay = ((e.item||"") + " " + (e.store||"") + " " + (e.memo||"")).toLowerCase();
+      const hay = ((e.store||"") + " " + (e.memo||"") + " " + (e.item||"")).toLowerCase();
       if (!hay.includes(kw)) return false;
     }
     return true;
@@ -339,8 +336,8 @@ function render(){
     row.className = "entry" + (e.id === $("editingId").value ? " entry-editing" : "");
     row.innerHTML = `
       <div class="entry-main">
-        <span class="entry-item">${escapeHtml(e.item || "(品目未入力)")}</span>
-        <span class="entry-meta">${e.entry_date}${e.store ? " ・ " + escapeHtml(e.store) : ""}${e.memo ? " ・ " + escapeHtml(e.memo) : ""}</span>
+        <span class="entry-item">${escapeHtml(e.store || e.item || "(店舗未入力)")}</span>
+        <span class="entry-meta">${e.entry_date}${e.memo ? " ・ " + escapeHtml(e.memo) : ""}</span>
       </div>
       <div style="display:flex; align-items:center;">
         <span class="entry-amount">¥${Number(e.amount).toLocaleString()}</span>
@@ -372,8 +369,7 @@ function startEdit(e){
   $("editingId").value = e.id;
   $("inpDate").value = e.entry_date;
   $("inpAmount").value = e.amount;
-  $("inpItem").value = e.item || "";
-  $("inpStore").value = e.store || "";
+  $("inpStore").value = e.store || e.item || "";
   $("inpMemo").value = e.memo || "";
   $("submitBtn").textContent = "更新";
   $("cancelEditBtn").style.display = "block";
@@ -383,7 +379,6 @@ function startEdit(e){
 
 function cancelEdit(){
   $("editingId").value = "";
-  $("inpItem").value = "";
   $("inpStore").value = "";
   $("inpAmount").value = "";
   $("inpMemo").value = "";
@@ -414,7 +409,6 @@ function wireEvents(){
     const payload = {
       tab_name: currentTab,
       entry_date: $("inpDate").value,
-      item: $("inpItem").value.trim(),
       store: $("inpStore").value.trim(),
       amount: Number($("inpAmount").value),
       memo: $("inpMemo").value.trim()
@@ -429,7 +423,6 @@ function wireEvents(){
     } else {
       const { error } = await sb.from("money_entries").insert(payload);
       if (error){ toast("追加失敗: " + error.message); return; }
-      $("inpItem").value = "";
       $("inpStore").value = "";
       $("inpAmount").value = "";
       $("inpMemo").value = "";
@@ -466,8 +459,7 @@ function exportPDF(){
   const rows = filtered.map(e => `
     <tr>
       <td>${e.entry_date}</td>
-      <td>${escapeHtml(e.item || "")}</td>
-      <td>${escapeHtml(e.store || "")}</td>
+      <td>${escapeHtml(e.store || e.item || "")}</td>
       <td class="num">¥${Number(e.amount).toLocaleString()}</td>
       <td>${escapeHtml(e.memo || "")}</td>
     </tr>
@@ -478,11 +470,11 @@ function exportPDF(){
     <div class="print-meta">期間: ${periodLabel()}${kw ? " ／ キーワード: " + escapeHtml(kw) : ""} ／ 出力日: ${todayStr()}</div>
     <table>
       <thead>
-        <tr><th>日付</th><th>品目</th><th>店舗・カテゴリ</th><th class="num">金額</th><th>メモ</th></tr>
+        <tr><th>日付</th><th>店舗</th><th class="num">金額</th><th>メモ</th></tr>
       </thead>
       <tbody>${rows}</tbody>
       <tfoot>
-        <tr><td colspan="3">合計（${filtered.length}件）</td><td class="num">¥${sum.toLocaleString()}</td><td></td></tr>
+        <tr><td colspan="2">合計（${filtered.length}件）</td><td class="num">¥${sum.toLocaleString()}</td><td></td></tr>
       </tfoot>
     </table>
   `;
@@ -500,13 +492,12 @@ function exportCSV(){
   const filtered = window.__lastFiltered || [];
   if (!filtered.length){ toast("出力するデータがありません"); return; }
 
-  const header = ["日付","品目","店舗・カテゴリ","金額","メモ"];
+  const header = ["日付","店舗","金額","メモ"];
   const lines = [header.join(",")];
   filtered.forEach(e=>{
     lines.push([
       e.entry_date,
-      csvEscape(e.item || ""),
-      csvEscape(e.store || ""),
+      csvEscape(e.store || e.item || ""),
       Number(e.amount),
       csvEscape(e.memo || "")
     ].join(","));
