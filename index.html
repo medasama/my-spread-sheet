@@ -54,6 +54,8 @@
   .sum-label{ font-size:12px; color:var(--accent); margin-bottom:4px; }
   .sum-value{ font-size:28px; font-weight:700; color:var(--accent); }
   .sum-count{ font-size:12px; color:var(--sub); margin-top:4px; }
+  .sum-breakdown{ font-size:12px; color:var(--sub); margin-top:8px; display:flex; justify-content:center; gap:14px; flex-wrap:wrap; }
+  .sum-breakdown b{ color:var(--ink); }
 
   .filter-row{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
   .filter-row select, .filter-row input{
@@ -64,7 +66,7 @@
   .date-range.show{ display:flex; }
 
   form.entry-form{ display:flex; flex-direction:column; gap:8px; }
-  .entry-form .row{ display:flex; gap:8px; min-width:0; }
+  .entry-form .row{ display:flex; gap:8px; }
   .entry-form input{
     flex:1; min-width:0; padding:10px; border:1px solid var(--border); border-radius:8px; font-size:14px;
   }
@@ -73,17 +75,27 @@
     font-size:14px; font-weight:600;
   }
 
+  .store-chips{ display:flex; gap:6px; flex-wrap:wrap; }
+  .store-chip{
+    padding:4px 12px; border-radius:14px; border:1px solid var(--border);
+    background:#fff; color:var(--sub); font-size:12px;
+  }
+
   .entry-list{ display:flex; flex-direction:column; gap:6px; }
   .entry{
     display:flex; justify-content:space-between; align-items:center;
-    padding:10px 4px; border-bottom:1px solid var(--border); font-size:14px;
+    padding:10px 4px; border-bottom:1px solid var(--border); font-size:14px; gap:8px;
   }
   .entry:last-child{ border-bottom:none; }
-  .entry-main{ display:flex; flex-direction:column; }
+  .entry-check{ flex:0 0 auto; width:20px; height:20px; accent-color:var(--accent); }
+  .entry-body{ display:flex; justify-content:space-between; align-items:center; flex:1; min-width:0; }
+  .entry-main{ display:flex; flex-direction:column; min-width:0; }
   .entry-item{ font-weight:600; }
   .entry-meta{ font-size:12px; color:var(--sub); }
   .entry-amount{ font-weight:700; margin-left:8px; white-space:nowrap; }
   .entry-del{ background:none; border:none; color:var(--danger); font-size:12px; margin-left:8px; }
+  .entry-settled .entry-item, .entry-settled .entry-amount{ text-decoration:line-through; opacity:0.55; }
+  .entry-settled .entry-meta{ opacity:0.55; }
 
   .empty{ text-align:center; color:var(--sub); font-size:13px; padding:20px 0; }
 
@@ -143,6 +155,7 @@
     <div class="sum-label">合計</div>
     <div class="sum-value" id="sumValue">¥0</div>
     <div class="sum-count" id="sumCount">0件</div>
+    <div class="sum-breakdown" id="sumBreakdown"></div>
   </div>
 
   <div class="card">
@@ -152,7 +165,11 @@
         <input type="date" id="inpDate" required>
         <input type="number" id="inpAmount" placeholder="金額" required inputmode="numeric">
       </div>
-      <input type="text" id="inpStore" placeholder="店舗">
+      <div class="row">
+        <input type="text" id="inpItem" placeholder="品目">
+        <input type="text" id="inpStore" placeholder="店舗・カテゴリ">
+      </div>
+      <div class="store-chips" id="storeChips"></div>
       <input type="text" id="inpMemo" placeholder="メモ（任意）">
       <div class="form-actions">
         <button type="button" class="btn-cancel" id="cancelEditBtn" style="display:none;">キャンセル</button>
@@ -169,7 +186,14 @@
         <option value="all">全期間</option>
         <option value="custom">期間を指定</option>
       </select>
-      <input type="text" id="keyword" placeholder="店舗・メモで絞り込み">
+      <select id="settledSelect">
+        <option value="all">精算状況：すべて</option>
+        <option value="unsettled">未精算のみ</option>
+        <option value="settled">精算済みのみ</option>
+      </select>
+    </div>
+    <div class="filter-row">
+      <input type="text" id="keyword" placeholder="店舗・品目で絞り込み">
     </div>
     <div class="date-range" id="customRange">
       <input type="date" id="rangeFrom">
@@ -312,14 +336,21 @@ function getPeriodRange(){
 function render(){
   const [from, to] = getPeriodRange();
   const kw = $("keyword").value.trim().toLowerCase();
+  const settledMode = $("settledSelect").value;
 
-  const filtered = entries.filter(e=>{
+  const scoped = entries.filter(e=>{
     if (from && e.entry_date < from) return false;
     if (to && e.entry_date > to) return false;
     if (kw){
-      const hay = ((e.store||"") + " " + (e.memo||"") + " " + (e.item||"")).toLowerCase();
+      const hay = ((e.item||"") + " " + (e.store||"") + " " + (e.memo||"")).toLowerCase();
       if (!hay.includes(kw)) return false;
     }
+    return true;
+  });
+
+  const filtered = scoped.filter(e=>{
+    if (settledMode === "unsettled") return !e.settled;
+    if (settledMode === "settled") return !!e.settled;
     return true;
   });
 
@@ -327,25 +358,33 @@ function render(){
   $("sumValue").textContent = "¥" + sum.toLocaleString();
   $("sumCount").textContent = filtered.length + "件";
 
+  const unsettledSum = scoped.filter(e=>!e.settled).reduce((s,e)=>s + Number(e.amount||0), 0);
+  const settledSum = scoped.filter(e=>e.settled).reduce((s,e)=>s + Number(e.amount||0), 0);
+  $("sumBreakdown").innerHTML = `未精算 <b>¥${unsettledSum.toLocaleString()}</b> ・ 精算済み <b>¥${settledSum.toLocaleString()}</b>`;
+
   const list = $("entryList");
   list.innerHTML = "";
   $("emptyMsg").style.display = filtered.length ? "none" : "block";
 
   filtered.forEach(e=>{
     const row = document.createElement("div");
-    row.className = "entry" + (e.id === $("editingId").value ? " entry-editing" : "");
+    row.className = "entry" + (e.id === $("editingId").value ? " entry-editing" : "") + (e.settled ? " entry-settled" : "");
     row.innerHTML = `
-      <div class="entry-main">
-        <span class="entry-item">${escapeHtml(e.store || e.item || "(店舗未入力)")}</span>
-        <span class="entry-meta">${e.entry_date}${e.memo ? " ・ " + escapeHtml(e.memo) : ""}</span>
-      </div>
-      <div style="display:flex; align-items:center;">
-        <span class="entry-amount">¥${Number(e.amount).toLocaleString()}</span>
-        <button class="entry-del" data-id="${e.id}">削除</button>
+      <input type="checkbox" class="entry-check" data-id="${e.id}" ${e.settled ? "checked" : ""} title="精算済みにする">
+      <div class="entry-body">
+        <div class="entry-main">
+          <span class="entry-item">${escapeHtml(e.item || "(品目未入力)")}</span>
+          <span class="entry-meta">${e.entry_date}${e.store ? " ・ " + escapeHtml(e.store) : ""}${e.memo ? " ・ " + escapeHtml(e.memo) : ""}</span>
+        </div>
+        <div style="display:flex; align-items:center;">
+          <span class="entry-amount">¥${Number(e.amount).toLocaleString()}</span>
+          <button class="entry-del" data-id="${e.id}">削除</button>
+        </div>
       </div>
     `;
     row.addEventListener("click", (ev)=>{
       if (ev.target.classList.contains("entry-del")) return;
+      if (ev.target.classList.contains("entry-check")) return;
       startEdit(e);
     });
     list.appendChild(row);
@@ -354,6 +393,7 @@ function render(){
   list.querySelectorAll(".entry-del").forEach(btn=>{
     btn.onclick = async (ev)=>{
       ev.stopPropagation();
+      if (!confirm("この記録を削除します。よろしいですか？")) return;
       const id = btn.getAttribute("data-id");
       const { error } = await sb.from("money_entries").delete().eq("id", id);
       if (error){ toast("削除失敗: " + error.message); return; }
@@ -362,14 +402,47 @@ function render(){
     };
   });
 
+  list.querySelectorAll(".entry-check").forEach(chk=>{
+    chk.onclick = (ev)=> ev.stopPropagation();
+    chk.onchange = async ()=>{
+      const id = chk.getAttribute("data-id");
+      const { error } = await sb.from("money_entries").update({ settled: chk.checked }).eq("id", id);
+      if (error){ toast("更新失敗: " + error.message); chk.checked = !chk.checked; return; }
+      await loadEntries();
+    };
+  });
+
+  renderStoreChips();
   window.__lastFiltered = filtered;
+}
+
+function renderStoreChips(){
+  const box = $("storeChips");
+  if (!box) return;
+  const counts = {};
+  entries.forEach(e=>{
+    const s = (e.store || "").trim();
+    if (!s) return;
+    counts[s] = (counts[s] || 0) + 1;
+  });
+  const names = Object.keys(counts).sort((a,b)=> counts[b]-counts[a]).slice(0, 8);
+  box.innerHTML = "";
+  names.forEach(name=>{
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "store-chip";
+    chip.textContent = name;
+    chip.onclick = ()=>{ $("inpStore").value = name; };
+    box.appendChild(chip);
+  });
 }
 
 function startEdit(e){
   $("editingId").value = e.id;
   $("inpDate").value = e.entry_date;
   $("inpAmount").value = e.amount;
-  $("inpStore").value = e.store || e.item || "";
+  $("inpItem").value = e.item || "";
+  $("inpStore").value = e.store || "";
   $("inpMemo").value = e.memo || "";
   $("submitBtn").textContent = "更新";
   $("cancelEditBtn").style.display = "block";
@@ -379,6 +452,7 @@ function startEdit(e){
 
 function cancelEdit(){
   $("editingId").value = "";
+  $("inpItem").value = "";
   $("inpStore").value = "";
   $("inpAmount").value = "";
   $("inpMemo").value = "";
@@ -402,6 +476,7 @@ function wireEvents(){
   $("keyword").oninput = render;
   $("rangeFrom").onchange = render;
   $("rangeTo").onchange = render;
+  $("settledSelect").onchange = render;
 
   $("entryForm").onsubmit = async (ev)=>{
     ev.preventDefault();
@@ -409,6 +484,7 @@ function wireEvents(){
     const payload = {
       tab_name: currentTab,
       entry_date: $("inpDate").value,
+      item: $("inpItem").value.trim(),
       store: $("inpStore").value.trim(),
       amount: Number($("inpAmount").value),
       memo: $("inpMemo").value.trim()
@@ -423,6 +499,7 @@ function wireEvents(){
     } else {
       const { error } = await sb.from("money_entries").insert(payload);
       if (error){ toast("追加失敗: " + error.message); return; }
+      $("inpItem").value = "";
       $("inpStore").value = "";
       $("inpAmount").value = "";
       $("inpMemo").value = "";
@@ -459,9 +536,11 @@ function exportPDF(){
   const rows = filtered.map(e => `
     <tr>
       <td>${e.entry_date}</td>
-      <td>${escapeHtml(e.store || e.item || "")}</td>
+      <td>${escapeHtml(e.item || "")}</td>
+      <td>${escapeHtml(e.store || "")}</td>
       <td class="num">¥${Number(e.amount).toLocaleString()}</td>
       <td>${escapeHtml(e.memo || "")}</td>
+      <td>${e.settled ? "済" : "未"}</td>
     </tr>
   `).join("");
 
@@ -470,11 +549,11 @@ function exportPDF(){
     <div class="print-meta">期間: ${periodLabel()}${kw ? " ／ キーワード: " + escapeHtml(kw) : ""} ／ 出力日: ${todayStr()}</div>
     <table>
       <thead>
-        <tr><th>日付</th><th>店舗</th><th class="num">金額</th><th>メモ</th></tr>
+        <tr><th>日付</th><th>品目</th><th>店舗・カテゴリ</th><th class="num">金額</th><th>メモ</th><th>精算</th></tr>
       </thead>
       <tbody>${rows}</tbody>
       <tfoot>
-        <tr><td colspan="2">合計（${filtered.length}件）</td><td class="num">¥${sum.toLocaleString()}</td><td></td></tr>
+        <tr><td colspan="3">合計（${filtered.length}件）</td><td class="num">¥${sum.toLocaleString()}</td><td colspan="2"></td></tr>
       </tfoot>
     </table>
   `;
@@ -492,14 +571,16 @@ function exportCSV(){
   const filtered = window.__lastFiltered || [];
   if (!filtered.length){ toast("出力するデータがありません"); return; }
 
-  const header = ["日付","店舗","金額","メモ"];
+  const header = ["日付","品目","店舗・カテゴリ","金額","メモ","精算状況"];
   const lines = [header.join(",")];
   filtered.forEach(e=>{
     lines.push([
       e.entry_date,
-      csvEscape(e.store || e.item || ""),
+      csvEscape(e.item || ""),
+      csvEscape(e.store || ""),
       Number(e.amount),
-      csvEscape(e.memo || "")
+      csvEscape(e.memo || ""),
+      e.settled ? "済" : "未"
     ].join(","));
   });
 
