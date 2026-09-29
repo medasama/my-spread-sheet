@@ -163,14 +163,11 @@
       <input type="hidden" id="editingId" value="">
       <div class="row">
         <input type="date" id="inpDate" required>
-        <input type="number" id="inpAmount" placeholder="金額" required inputmode="numeric">
-      </div>
-      <div class="row">
-        <input type="text" id="inpItem" placeholder="品目">
-        <input type="text" id="inpStore" placeholder="店舗・カテゴリ">
+        <input type="text" id="inpStore" placeholder="店舗">
       </div>
       <div class="store-chips" id="storeChips"></div>
-      <input type="text" id="inpMemo" placeholder="メモ（任意）">
+      <input type="number" id="inpAmount" placeholder="金額" required inputmode="numeric">
+      <input type="text" id="inpNote" placeholder="品目・メモ（任意）">
       <div class="form-actions">
         <button type="button" class="btn-cancel" id="cancelEditBtn" style="display:none;">キャンセル</button>
         <button type="submit" id="submitBtn">追加</button>
@@ -193,7 +190,10 @@
       </select>
     </div>
     <div class="filter-row">
-      <input type="text" id="keyword" placeholder="店舗・品目で絞り込み">
+      <select id="storeFilterSelect">
+        <option value="all">すべての店舗</option>
+      </select>
+      <input type="text" id="keyword" placeholder="品目・メモで絞り込み">
     </div>
     <div class="date-range" id="customRange">
       <input type="date" id="rangeFrom">
@@ -337,12 +337,14 @@ function render(){
   const [from, to] = getPeriodRange();
   const kw = $("keyword").value.trim().toLowerCase();
   const settledMode = $("settledSelect").value;
+  const storeFilter = $("storeFilterSelect").value;
 
   const scoped = entries.filter(e=>{
     if (from && e.entry_date < from) return false;
     if (to && e.entry_date > to) return false;
+    if (storeFilter !== "all" && (e.store || "") !== storeFilter) return false;
     if (kw){
-      const hay = ((e.item||"") + " " + (e.store||"") + " " + (e.memo||"")).toLowerCase();
+      const hay = ((e.item||"") + " " + (e.memo||"")).toLowerCase();
       if (!hay.includes(kw)) return false;
     }
     return true;
@@ -373,8 +375,8 @@ function render(){
       <input type="checkbox" class="entry-check" data-id="${e.id}" ${e.settled ? "checked" : ""} title="精算済みにする">
       <div class="entry-body">
         <div class="entry-main">
-          <span class="entry-item">${escapeHtml(e.item || "(品目未入力)")}</span>
-          <span class="entry-meta">${e.entry_date}${e.store ? " ・ " + escapeHtml(e.store) : ""}${e.memo ? " ・ " + escapeHtml(e.memo) : ""}</span>
+          <span class="entry-item">${escapeHtml(e.store || "(店舗未入力)")}</span>
+          <span class="entry-meta">${e.entry_date}${e.item ? " ・ " + escapeHtml(e.item) : ""}${e.memo ? " ・ " + escapeHtml(e.memo) : ""}</span>
         </div>
         <div style="display:flex; align-items:center;">
           <span class="entry-amount">¥${Number(e.amount).toLocaleString()}</span>
@@ -413,18 +415,24 @@ function render(){
   });
 
   renderStoreChips();
+  renderStoreFilterOptions();
   window.__lastFiltered = filtered;
 }
 
-function renderStoreChips(){
-  const box = $("storeChips");
-  if (!box) return;
+function storeCounts(){
   const counts = {};
   entries.forEach(e=>{
     const s = (e.store || "").trim();
     if (!s) return;
     counts[s] = (counts[s] || 0) + 1;
   });
+  return counts;
+}
+
+function renderStoreChips(){
+  const box = $("storeChips");
+  if (!box) return;
+  const counts = storeCounts();
   const names = Object.keys(counts).sort((a,b)=> counts[b]-counts[a]).slice(0, 8);
   box.innerHTML = "";
   names.forEach(name=>{
@@ -437,13 +445,23 @@ function renderStoreChips(){
   });
 }
 
+function renderStoreFilterOptions(){
+  const sel = $("storeFilterSelect");
+  if (!sel) return;
+  const prev = sel.value || "all";
+  const counts = storeCounts();
+  const names = Object.keys(counts).sort((a,b)=> counts[b]-counts[a]);
+  sel.innerHTML = `<option value="all">すべての店舗</option>` +
+    names.map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
+  sel.value = names.includes(prev) || prev === "all" ? prev : "all";
+}
+
 function startEdit(e){
   $("editingId").value = e.id;
   $("inpDate").value = e.entry_date;
   $("inpAmount").value = e.amount;
-  $("inpItem").value = e.item || "";
   $("inpStore").value = e.store || "";
-  $("inpMemo").value = e.memo || "";
+  $("inpNote").value = [e.item, e.memo].filter(Boolean).join(" ・ ");
   $("submitBtn").textContent = "更新";
   $("cancelEditBtn").style.display = "block";
   render();
@@ -452,10 +470,9 @@ function startEdit(e){
 
 function cancelEdit(){
   $("editingId").value = "";
-  $("inpItem").value = "";
   $("inpStore").value = "";
   $("inpAmount").value = "";
-  $("inpMemo").value = "";
+  $("inpNote").value = "";
   $("inpDate").value = todayStr();
   $("submitBtn").textContent = "追加";
   $("cancelEditBtn").style.display = "none";
@@ -477,6 +494,7 @@ function wireEvents(){
   $("rangeFrom").onchange = render;
   $("rangeTo").onchange = render;
   $("settledSelect").onchange = render;
+  $("storeFilterSelect").onchange = render;
 
   $("entryForm").onsubmit = async (ev)=>{
     ev.preventDefault();
@@ -484,10 +502,10 @@ function wireEvents(){
     const payload = {
       tab_name: currentTab,
       entry_date: $("inpDate").value,
-      item: $("inpItem").value.trim(),
+      item: "",
       store: $("inpStore").value.trim(),
       amount: Number($("inpAmount").value),
-      memo: $("inpMemo").value.trim()
+      memo: $("inpNote").value.trim()
     };
     const editingId = $("editingId").value;
 
@@ -499,10 +517,9 @@ function wireEvents(){
     } else {
       const { error } = await sb.from("money_entries").insert(payload);
       if (error){ toast("追加失敗: " + error.message); return; }
-      $("inpItem").value = "";
       $("inpStore").value = "";
       $("inpAmount").value = "";
-      $("inpMemo").value = "";
+      $("inpNote").value = "";
       $("inpDate").value = todayStr();
       toast("追加しました");
     }
@@ -536,10 +553,9 @@ function exportPDF(){
   const rows = filtered.map(e => `
     <tr>
       <td>${e.entry_date}</td>
-      <td>${escapeHtml(e.item || "")}</td>
       <td>${escapeHtml(e.store || "")}</td>
       <td class="num">¥${Number(e.amount).toLocaleString()}</td>
-      <td>${escapeHtml(e.memo || "")}</td>
+      <td>${escapeHtml([e.item, e.memo].filter(Boolean).join(" ・ "))}</td>
       <td>${e.settled ? "済" : "未"}</td>
     </tr>
   `).join("");
@@ -549,11 +565,11 @@ function exportPDF(){
     <div class="print-meta">期間: ${periodLabel()}${kw ? " ／ キーワード: " + escapeHtml(kw) : ""} ／ 出力日: ${todayStr()}</div>
     <table>
       <thead>
-        <tr><th>日付</th><th>品目</th><th>店舗・カテゴリ</th><th class="num">金額</th><th>メモ</th><th>精算</th></tr>
+        <tr><th>日付</th><th>店舗</th><th class="num">金額</th><th>品目・メモ</th><th>精算</th></tr>
       </thead>
       <tbody>${rows}</tbody>
       <tfoot>
-        <tr><td colspan="3">合計（${filtered.length}件）</td><td class="num">¥${sum.toLocaleString()}</td><td colspan="2"></td></tr>
+        <tr><td colspan="2">合計（${filtered.length}件）</td><td class="num">¥${sum.toLocaleString()}</td><td colspan="2"></td></tr>
       </tfoot>
     </table>
   `;
@@ -571,15 +587,14 @@ function exportCSV(){
   const filtered = window.__lastFiltered || [];
   if (!filtered.length){ toast("出力するデータがありません"); return; }
 
-  const header = ["日付","品目","店舗・カテゴリ","金額","メモ","精算状況"];
+  const header = ["日付","店舗","金額","品目・メモ","精算状況"];
   const lines = [header.join(",")];
   filtered.forEach(e=>{
     lines.push([
       e.entry_date,
-      csvEscape(e.item || ""),
       csvEscape(e.store || ""),
       Number(e.amount),
-      csvEscape(e.memo || ""),
+      csvEscape([e.item, e.memo].filter(Boolean).join(" ・ ")),
       e.settled ? "済" : "未"
     ].join(","));
   });
