@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>お金の帳簿</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <style>
   :root{
     --bg:#f5f5f3; --card:#ffffff; --ink:#1f1f1f; --sub:#767672;
@@ -118,6 +120,19 @@
 
   #printArea{ display:none; }
 
+  #printArea.capture{
+    display:block; position:fixed; left:-10000px; top:0; width:760px;
+    background:#fff; padding:24px;
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif;
+  }
+  #printArea.capture h2{ font-size:18px; margin:0 0 6px; }
+  #printArea.capture .print-meta{ font-size:13px; color:#555; margin-bottom:14px; }
+  #printArea.capture table{ width:100%; border-collapse:collapse; font-size:13px; }
+  #printArea.capture th, #printArea.capture td{ border:1px solid #999; padding:8px 10px; text-align:left; }
+  #printArea.capture th{ background:#eee; }
+  #printArea.capture td.num, #printArea.capture th.num{ text-align:right; }
+  #printArea.capture tfoot td{ font-weight:700; background:#f5f5f5; }
+
   @media print{
     body *{ visibility:hidden; }
     #printArea, #printArea *{ visibility:visible; }
@@ -133,6 +148,31 @@
     #printArea td.num, #printArea th.num{ text-align:right; }
     #printArea tfoot td{ font-weight:700; background:#f5f5f5; }
   }
+
+  .link-modal{
+    position:fixed; inset:0; background:rgba(0,0,0,.45);
+    display:none; align-items:center; justify-content:center; z-index:50; padding:16px;
+  }
+  .link-modal.show{ display:flex; }
+  .link-modal-card{
+    background:#fff; border-radius:14px; padding:20px; max-width:340px; width:100%;
+  }
+  .link-modal-card h3{ font-size:15px; margin:0 0 12px; }
+  .link-url-input{
+    width:100%; padding:10px; border:1px solid var(--border); border-radius:8px;
+    font-size:13px; margin-bottom:10px; background:#f9f9f8;
+  }
+  .link-modal-actions{ display:flex; gap:8px; margin-bottom:8px; }
+  .link-modal-actions button, .link-modal-actions a{
+    flex:1; padding:10px; border:none; border-radius:8px; font-size:13px; font-weight:600;
+    text-align:center; text-decoration:none; cursor:pointer;
+  }
+  .btn-copy{ background:var(--accent); color:#fff; }
+  .btn-line{ background:#06c755; color:#fff; }
+  .link-modal-close{
+    display:block; width:100%; background:none; border:none; color:var(--sub);
+    font-size:12px; padding:6px; text-decoration:underline;
+  }
 </style>
 </head>
 <body>
@@ -144,6 +184,7 @@
   </div>
   <div class="header-export">
     <button type="button" class="export-link" id="pdfBtn">PDF出力</button>
+    <button type="button" class="export-link" id="pdfLinkBtn">PDFリンク</button>
     <button type="button" class="export-link" id="csvBtn">CSV出力</button>
   </div>
 </header>
@@ -215,6 +256,18 @@
 <div class="toast" id="toast"></div>
 
 <div id="printArea"></div>
+
+<div class="link-modal" id="linkModal">
+  <div class="link-modal-card">
+    <h3>PDFのリンクができました</h3>
+    <input type="text" class="link-url-input" id="linkUrlInput" readonly onclick="this.select()">
+    <div class="link-modal-actions">
+      <button type="button" class="btn-copy" id="copyLinkBtn">リンクをコピー</button>
+      <a href="#" class="btn-line" id="lineShareLink" target="_blank" rel="noopener">LINEで送る</a>
+    </div>
+    <button type="button" class="link-modal-close" id="closeLinkModalBtn">閉じる</button>
+  </div>
+</div>
 
 <script>
 // ▼▼▼ ここを自分のSupabaseプロジェクトの値に書き換えてください ▼▼▼
@@ -530,7 +583,11 @@ function wireEvents(){
   $("renameTabBtn").onclick = renameCurrentTab;
   $("deleteTabBtn").onclick = deleteCurrentTab;
   $("pdfBtn").onclick = exportPDF;
+  $("pdfLinkBtn").onclick = exportPDFLink;
   $("csvBtn").onclick = exportCSV;
+  $("copyLinkBtn").onclick = copyLinkUrl;
+  $("closeLinkModalBtn").onclick = hideLinkModal;
+  $("linkModal").onclick = (ev)=>{ if (ev.target.id === "linkModal") hideLinkModal(); };
 }
 
 function periodLabel(){
@@ -543,10 +600,7 @@ function periodLabel(){
   return "全期間";
 }
 
-function exportPDF(){
-  const filtered = window.__lastFiltered || [];
-  if (!filtered.length){ toast("出力するデータがありません"); return; }
-
+function buildPrintHtml(filtered){
   const kw = $("keyword").value.trim();
   const sum = filtered.reduce((s,e)=>s + Number(e.amount||0), 0);
 
@@ -560,7 +614,7 @@ function exportPDF(){
     </tr>
   `).join("");
 
-  $("printArea").innerHTML = `
+  return `
     <h2>お金の帳簿 - ${escapeHtml(currentTab)}</h2>
     <div class="print-meta">期間: ${periodLabel()}${kw ? " ／ キーワード: " + escapeHtml(kw) : ""} ／ 出力日: ${todayStr()}</div>
     <table>
@@ -573,8 +627,95 @@ function exportPDF(){
       </tfoot>
     </table>
   `;
+}
+
+function exportPDF(){
+  const filtered = window.__lastFiltered || [];
+  if (!filtered.length){ toast("出力するデータがありません"); return; }
+
+  $("printArea").innerHTML = buildPrintHtml(filtered);
 
   window.print();
+}
+
+async function exportPDFLink(){
+  const filtered = window.__lastFiltered || [];
+  if (!filtered.length){ toast("出力するデータがありません"); return; }
+  if (typeof html2canvas === "undefined" || !window.jspdf){
+    toast("PDF作成の準備に失敗しました（通信環境を確認してください）");
+    return;
+  }
+
+  toast("PDFを作成中...");
+  const area = $("printArea");
+  area.innerHTML = buildPrintHtml(filtered);
+  area.classList.add("capture");
+
+  try{
+    const canvas = await html2canvas(area, { scale: 2, backgroundColor: "#ffffff" });
+
+    const { jsPDF } = window.jspdf;
+    const pageWidthMm = 210;
+    const pageHeightMm = 297;
+    const imgWidthMm = pageWidthMm;
+    const imgHeightMm = canvas.height * imgWidthMm / canvas.width;
+    const imgData = canvas.toDataURL("image/png");
+
+    const pdf = new jsPDF({ unit: "mm", format: "a4" });
+    let heightLeft = imgHeightMm;
+    let position = 0;
+
+    pdf.addImage(imgData, "PNG", 0, position, imgWidthMm, imgHeightMm);
+    heightLeft -= pageHeightMm;
+
+    while (heightLeft > 0){
+      position = heightLeft - imgHeightMm;
+      pdf.addPage();
+      pdf.addImage(imgData, "PNG", 0, position, imgWidthMm, imgHeightMm);
+      heightLeft -= pageHeightMm;
+    }
+
+    const blob = pdf.output("blob");
+    const path = `${currentTab}/${Date.now()}.pdf`;
+
+    const { error: upErr } = await sb.storage.from("money-tabs-pdfs").upload(path, blob, {
+      contentType: "application/pdf",
+      upsert: true
+    });
+    if (upErr){
+      toast("アップロード失敗: " + upErr.message);
+      return;
+    }
+
+    const { data } = sb.storage.from("money-tabs-pdfs").getPublicUrl(path);
+    showLinkModal(data.publicUrl);
+  } catch(err){
+    toast("PDF作成に失敗しました: " + err.message);
+  } finally {
+    area.classList.remove("capture");
+  }
+}
+
+function showLinkModal(url){
+  $("linkUrlInput").value = url;
+  const shareText = encodeURIComponent(`${currentTab}の記録\n${url}`);
+  $("lineShareLink").href = `https://line.me/R/msg/text/?${shareText}`;
+  $("linkModal").classList.add("show");
+}
+
+function hideLinkModal(){
+  $("linkModal").classList.remove("show");
+}
+
+async function copyLinkUrl(){
+  const url = $("linkUrlInput").value;
+  try{
+    await navigator.clipboard.writeText(url);
+    toast("リンクをコピーしました");
+  } catch(err){
+    $("linkUrlInput").select();
+    toast("選択されたリンクをコピーしてください");
+  }
 }
 
 function csvEscape(v){
